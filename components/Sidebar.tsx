@@ -40,7 +40,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeMenu, activeSubMenu, on
     return (
       <div className="mb-2">
         <button
-          onClick={() => subMenus ? toggleExpand(type) : null}
+          onClick={() => subMenus ? toggleExpand(type) : onMenuSelect(type, null as any)}
           className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors ${
             isActive && !subMenus ? 'bg-blue-50 text-blue-600 font-semibold' : 'hover:bg-slate-100 text-slate-700'
           }`}
@@ -84,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeMenu, activeSubMenu, on
            {isOpen && (
              <div className="text-center leading-tight">
                <h1 className="text-[10px] font-bold text-blue-900 tracking-tight">ĐÀI KHÍ TƯỢNG THUỶ VĂN</h1>
-               <h2 className="text-[10px] font-bold text-blue-700">TỈNH LÂM ĐỒNG</h2>
+               <h2 className="text-[10px] font-bold text-blue-900 tracking-tight">TỈNH LÂM ĐỒNG</h2>
              </div>
            )}
         </div>

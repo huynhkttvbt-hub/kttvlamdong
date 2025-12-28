@@ -7,7 +7,7 @@ import HydroSummary from './components/HydroSummary';
 import HydroGroupSummary from './components/HydroGroupSummary';
 import SetupGuide from './components/SetupGuide';
 import { MenuType, SubMenuType, StationMetadata, FilterState } from './types';
-import { fetchMetadata } from './services/dataService';
+import { fetchMetadata, trackVisit } from './services/dataService';
 import { isConfigured } from './supabaseClient';
 
 const App: React.FC = () => {
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [activeSubMenu, setActiveSubMenu] = useState<SubMenuType>(SubMenuType.CHI_TIET);
   const [metadata, setMetadata] = useState<StationMetadata[]>([]);
   const [hasConfig, setHasConfig] = useState(isConfigured());
+  const [visitorCount, setVisitorCount] = useState<number>(0);
 
   // State lọc chung để quản lý đồng bộ dropdown
   const [filters, setFilters] = useState<FilterState>({
@@ -29,6 +30,10 @@ const App: React.FC = () => {
     if (hasConfig) {
       const load = async () => {
         try {
+          // Track lượt truy cập
+          const count = await trackVisit();
+          setVisitorCount(count);
+
           const data = await fetchMetadata();
           setMetadata(data);
           
@@ -42,7 +47,7 @@ const App: React.FC = () => {
             }));
           }
         } catch (e) {
-          console.error("Lỗi khi tải metadata:", e);
+          console.error("Lỗi khởi tạo ứng dụng:", e);
         }
       };
       load();
@@ -51,18 +56,14 @@ const App: React.FC = () => {
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
-  // 1. Tính toán danh sách Đài (TenDai) duy nhất
   const availableGroups = useMemo(() => 
     Array.from(new Set(metadata.map(m => m.TenDai).filter(Boolean))).sort() as string[]
   , [metadata]);
 
-  // 2. TÍNH TOÁN TRẠM THEO ĐÀI ĐÃ CHỌN (Yêu cầu chính của bạn)
   const filteredStations = useMemo(() => {
     if (!filters.stationGroup) {
-      // Nếu chưa chọn đài, hiện tất cả trạm (unique)
       return Array.from(new Set(metadata.map(m => m.TenTram).filter(Boolean))).sort() as string[];
     }
-    // Lọc các trạm thuộc về Đài đang chọn
     return metadata
       .filter(m => m.TenDai === filters.stationGroup)
       .map(m => m.TenTram)
@@ -70,15 +71,12 @@ const App: React.FC = () => {
       .sort() as string[];
   }, [metadata, filters.stationGroup]);
 
-  // Hàm xử lý khi thay đổi filter (bao gồm logic reset trạm khi đổi đài)
   const handleFilterChange = (newFilters: FilterState) => {
-    // Nếu đổi Đài, cần kiểm tra xem Trạm hiện tại có thuộc Đài mới không
     if (newFilters.stationGroup !== filters.stationGroup) {
       const stationsForNewGroup = metadata
         .filter(m => m.TenDai === newFilters.stationGroup)
         .map(m => m.TenTram);
       
-      // Chọn trạm đầu tiên của đài mới
       const defaultStation = stationsForNewGroup.length > 0 ? stationsForNewGroup[0] : '';
       setFilters({ ...newFilters, stationName: defaultStation });
     } else {
@@ -89,6 +87,24 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (!hasConfig) {
       return <SetupGuide />;
+    }
+
+    // Ghi chú tạm cho Khí tượng
+    if (activeMenu === MenuType.KHI_TUONG) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[500px] text-slate-400 bg-white rounded-3xl border-2 border-dashed border-slate-100 m-6 shadow-sm">
+          <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
+            <svg className="w-12 h-12 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Dữ liệu Khí tượng</h2>
+          <p className="text-sm font-bold text-blue-500 mt-2">CHƯA CÓ DỮ LIỆU - ĐANG TRONG QUÁ TRÌNH THIẾT LẬP BẢNG</p>
+          <div className="mt-8">
+             <span className="px-4 py-1.5 bg-slate-50 rounded-full text-[10px] font-black text-slate-400 uppercase tracking-widest">Ghi chú: Đang cấu hình Supabase</span>
+          </div>
+        </div>
+      );
     }
 
     if (activeSubMenu === SubMenuType.CHI_TIET) {
@@ -109,13 +125,7 @@ const App: React.FC = () => {
 
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 m-6">
-        <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-          <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-          </svg>
-        </div>
         <h2 className="text-lg font-bold text-slate-600 uppercase tracking-tight">Tính năng đang phát triển</h2>
-        <p className="text-sm">Mục {activeMenu} hiện đang được cập nhật dữ liệu.</p>
       </div>
     );
   };
@@ -159,9 +169,9 @@ const App: React.FC = () => {
           activeMenuName={info.menu} 
           activeSubMenuName={info.sub}
           isConfigured={hasConfig}
+          visitorCount={visitorCount}
         />
         
-        {/* Main scroll container */}
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 pb-12">
           {renderContent()}
         </main>

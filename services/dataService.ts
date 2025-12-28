@@ -1,3 +1,4 @@
+
 import { supabase } from '../supabaseClient';
 import { HydroData, FilterState, StationMetadata } from '../types';
 
@@ -34,7 +35,6 @@ export const fetchHydroData = async (filters: FilterState): Promise<HydroData[]>
 };
 
 export const updateHydroData = async (payload: any): Promise<boolean> => {
-  // Tìm record cũ để lấy ID hoặc Upsert dựa trên Unique Constraint (nếu có)
   const { data: existing } = await supabase
     .from('so_lieu_thuy_van')
     .select('id')
@@ -53,5 +53,36 @@ export const updateHydroData = async (payload: any): Promise<boolean> => {
       .from('so_lieu_thuy_van')
       .insert([payload]);
     return !error;
+  }
+};
+
+/**
+ * Hàm theo dõi lượt truy cập
+ */
+export const trackVisit = async (): Promise<number> => {
+  try {
+    const { data, error } = await supabase
+      .from('app_stats')
+      .select('count')
+      .eq('counter_name', 'total_visits')
+      .maybeSingle();
+
+    if (error) throw error;
+
+    let newCount = (data?.count || 0) + 1;
+
+    if (!data) {
+      await supabase.from('app_stats').insert([{ counter_name: 'total_visits', count: 1 }]);
+      return 1;
+    } else {
+      await supabase
+        .from('app_stats')
+        .update({ count: newCount })
+        .eq('counter_name', 'total_visits');
+      return newCount;
+    }
+  } catch (e) {
+    console.warn("Visitor counter error:", e);
+    return 0;
   }
 };
