@@ -13,6 +13,16 @@ export interface StationMetadata {
   TenDai: string;
 }
 
+export interface TBNNData {
+  TenTram: string;
+  Thang: number;
+  Ky: string; // 'MONTH', 'T1', 'T2', 'T3'
+  Htb: number | null;
+  Hmax: number | null;
+  Hmin: number | null;
+  Rtb: number | null;
+}
+
 export interface FilterState {
   from: string;
   to: string;
@@ -32,6 +42,7 @@ export enum SubMenuType {
   DAC_TRUNG = 'DAC_TRUNG',
   CHI_TIET = 'CHI_TIET',
   TONG_HOP = 'TONG_HOP',
+  TONG_HOP_NGAY = 'TONG_HOP_NGAY', // Thêm mới
   KT_PHU_QUY = 'KT_PHU_QUY',
   TV_PHU_QUY = 'TV_PHU_QUY'
 }

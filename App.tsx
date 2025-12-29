@@ -5,6 +5,7 @@ import Header from './components/Header';
 import HydroDashboard from './components/HydroDashboard';
 import HydroSummary from './components/HydroSummary';
 import HydroGroupSummary from './components/HydroGroupSummary';
+import DailySynthesis from './components/DailySynthesis'; // Import mới
 import SetupGuide from './components/SetupGuide';
 import { MenuType, SubMenuType, StationMetadata, FilterState } from './types';
 import { fetchMetadata, trackVisit } from './services/dataService';
@@ -122,6 +123,9 @@ const App: React.FC = () => {
     if (activeSubMenu === SubMenuType.TONG_HOP) {
       return <HydroGroupSummary />;
     }
+    if (activeSubMenu === SubMenuType.TONG_HOP_NGAY) { // Xử lý render menu mới
+      return <DailySynthesis />;
+    }
 
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 m-6">
@@ -141,7 +145,8 @@ const App: React.FC = () => {
     const subNames: Record<string, string> = {
       [SubMenuType.CHI_TIET]: 'Số liệu chi tiết',
       [SubMenuType.DAC_TRUNG]: 'Đặc trưng tháng',
-      [SubMenuType.TONG_HOP]: 'Tổng hợp đài'
+      [SubMenuType.TONG_HOP]: 'Tổng hợp đài',
+      [SubMenuType.TONG_HOP_NGAY]: 'Tổng hợp ngày' // Thêm tên
     };
     return { 
       menu: names[activeMenu] || activeMenu, 
