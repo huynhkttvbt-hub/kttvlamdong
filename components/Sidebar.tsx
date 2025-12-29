@@ -106,7 +106,8 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, activeMenu, activeSubMenu, on
           label="THUỶ VĂN" 
           type={MenuType.THUY_VAN}
           subMenus={[
-            { label: 'Tổng hợp đài', type: SubMenuType.TONG_HOP },
+            { label: 'Tổng hợp theo ngày', type: SubMenuType.TONG_HOP_NGAY }, // Thêm menu này
+            { label: 'Tổng hợp theo đài', type: SubMenuType.TONG_HOP },
             { label: 'Số liệu đặc trưng', type: SubMenuType.DAC_TRUNG },
             { label: 'Số liệu chi tiết', type: SubMenuType.CHI_TIET }
           ]}

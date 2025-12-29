@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { StationMetadata } from '../types';
+import { StationMetadata, TBNNData } from '../types';
 import { 
   BarChart, 
   Bar, 
@@ -11,9 +11,9 @@ import {
   ResponsiveContainer,
   Cell
 } from 'recharts';
-import { FileSpreadsheet, Calendar, RefreshCw, AlertCircle, Filter, MapPin, Layers } from 'lucide-react';
+import { FileSpreadsheet, Calendar, RefreshCw, AlertCircle, Filter, MapPin, Layers, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { fetchMetadata } from '../services/dataService';
+import { fetchMetadata, fetchTBNN } from '../services/dataService';
 import * as XLSX from 'xlsx';
 
 type PeriodType = 'MONTH' | 'T1' | 'T2' | 'T3' | 'DAY';
@@ -33,6 +33,7 @@ const HydroSummary: React.FC = () => {
   const [specificDate, setSpecificDate] = useState(now.toISOString().split('T')[0]);
 
   const [rawStats, setRawStats] = useState<any[]>([]);
+  const [tbnnData, setTbnnData] = useState<TBNNData | null>(null);
 
   // 1. Load Metadata
   useEffect(() => {
@@ -59,7 +60,6 @@ const HydroSummary: React.FC = () => {
       .filter(Boolean)
       .sort() as string[];
     
-    // Auto-select first station when group changes
     if (stations.length > 0 && !stations.includes(selectedStation)) {
       setSelectedStation(stations[0]);
     }
@@ -89,6 +89,11 @@ const HydroSummary: React.FC = () => {
       const { data, error: sbError } = await query.order('Ngay', { ascending: true });
       if (sbError) throw sbError;
       setRawStats(data || []);
+
+      const monthForTbnn = period === 'DAY' ? new Date(specificDate).getMonth() + 1 : selectedMonth;
+      const tbnn = await fetchTBNN(selectedStation, monthForTbnn, period);
+      setTbnnData(tbnn);
+
     } catch (err: any) {
       setError(err?.message || 'Lỗi tải dữ liệu đặc trưng');
     } finally {
@@ -111,14 +116,20 @@ const HydroSummary: React.FC = () => {
 
     const hMax = hMaxArr.length ? Math.max(...hMaxArr) : 0;
     const hMin = hMinArr.length ? Math.min(...hMinArr) : 0;
-    const hTb = hTbArr.length ? (hTbArr.reduce((a, b) => a + b, 0) / hTbArr.length).toFixed(1) : 0;
+    const hTb = hTbArr.length ? (hTbArr.reduce((a, b) => a + b, 0) / hTbArr.length) : 0;
     const rainSum = rainArr.reduce((a, b) => a + b, 0).toFixed(1);
+    
+    const rainMax = rainArr.length ? Math.max(...rainArr) : 0;
 
-    // Find date for Max/Min
     const maxDay = rawStats.find(d => parseFloat(d.Hmax) === hMax)?.Ngay || '-';
     const minDay = rawStats.find(d => parseFloat(d.Hmin) === hMin)?.Ngay || '-';
+    const ngayRainMax = rawStats.find(d => parseFloat(d.R24) === rainMax)?.Ngay || '-';
 
-    return { hMax, hMin, hTb, rainSum, maxDay, minDay, count: rawStats.length };
+    return { 
+      hMax, hMin, hTb, 
+      rainSum, rainMax, maxDay, minDay, ngayRainMax,
+      count: rawStats.length 
+    };
   }, [rawStats]);
 
   const handleExportExcel = () => {
@@ -126,25 +137,43 @@ const HydroSummary: React.FC = () => {
     const exportData = [{
       'Trạm': selectedStation,
       'Thời kỳ': period,
-      'Số ngày mưa': processedStats.count,
-      'Hmax (cm)': processedStats.hMax,
+      'Hmax Thực tế': processedStats.hMax,
+      'Hmax TBNN': tbnnData?.Hmax || '-',
       'Ngày Hmax': processedStats.maxDay,
-      'Hmin (cm)': processedStats.hMin,
+      'Hmin Thực tế': processedStats.hMin,
+      'Hmin TBNN': tbnnData?.Hmin || '-',
       'Ngày Hmin': processedStats.minDay,
-      'Htb (cm)': processedStats.hTb,
-      'Tổng mưa (mm)': processedStats.rainSum
+      'Htb Thực tế': processedStats.hTb.toFixed(2),
+      'Htb TBNN': tbnnData?.Htb || '-',
+      'Tổng mưa': processedStats.rainSum
     }];
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "DacTrung");
+    XLSX.utils.book_append_sheet(wb, ws, "DacTrung_SoSanh");
     XLSX.writeFile(wb, `DacTrung_${selectedStation}_${selectedMonth}_${selectedYear}.xlsx`);
+  };
+
+  const ComparisonBadge = ({ current, target, unit = 'cm' }: { current: number, target: number | null, unit?: string }) => {
+    if (target === null || target === undefined) return <span className="text-[9px] text-slate-300 italic">--</span>;
+    
+    const diff = current - target;
+    const isHigher = diff > 0;
+    const formattedDiff = Math.abs(diff).toFixed(2);
+    
+    if (Math.abs(diff) < 0.01) return <span className="text-[9px] font-bold text-slate-400 flex items-center gap-1"><Minus size={10} /> 0 {unit}</span>;
+
+    return (
+      <div className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full ${isHigher ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+        {isHigher ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+        <span>{isHigher ? '+' : '-'}{formattedDiff} {unit}</span>
+      </div>
+    );
   };
 
   return (
     <div className="p-4 md:p-6 space-y-6 animate-fadeIn max-w-[1400px] mx-auto">
-      {/* Dynamic Filter Bar */}
+      {/* Filter Bar */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-end gap-4">
-        {/* Đài */}
         <div className="flex flex-col gap-1.5 w-[140px]">
           <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
             <Layers size={10} /> Đài
@@ -158,7 +187,6 @@ const HydroSummary: React.FC = () => {
           </select>
         </div>
 
-        {/* Trạm */}
         <div className="flex flex-col gap-1.5 w-[160px]">
           <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
             <MapPin size={10} /> Trạm
@@ -172,7 +200,6 @@ const HydroSummary: React.FC = () => {
           </select>
         </div>
 
-        {/* Thời kỳ */}
         <div className="flex flex-col gap-1.5 min-w-[130px]">
           <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
             <Calendar size={10} /> Thời kỳ
@@ -252,7 +279,7 @@ const HydroSummary: React.FC = () => {
                 <Filter size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Số liệu đặc trưng thời kỳ</h3>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Số liệu đặc trưng & So sánh TBNN</h3>
                 <p className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedStation} • {period}</p>
               </div>
             </div>
@@ -265,38 +292,68 @@ const HydroSummary: React.FC = () => {
             <table className="w-full text-left border-separate border-spacing-0 border border-slate-300 rounded-lg overflow-hidden">
               <thead className="bg-slate-100">
                 <tr>
-                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">Đặc trưng</th>
-                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">Giá trị</th>
-                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-b border-slate-300 text-center">Ngày/Chi tiết</th>
+                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">Yếu tố</th>
+                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">Thực đo</th>
+                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">TBNN</th>
+                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-r border-b border-slate-300 text-center">So sánh</th>
+                  <th className="p-3 text-[10px] font-black text-slate-500 uppercase border-b border-slate-300 text-center">Thời gian xuất hiện</th>
                 </tr>
               </thead>
               <tbody className="bg-white">
                 {processedStats ? (
                   <>
                     <tr className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Mực nước cao nhất (Hmax)</td>
-                      <td className="p-4 text-center border-r border-b border-slate-300"><span className="text-sm font-black text-red-600">{processedStats.hMax} cm</span></td>
+                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Hmax (cm)</td>
+                      <td className="p-4 text-center border-r border-b border-slate-300"><span className="text-sm font-black text-red-600">{processedStats.hMax}</span></td>
+                      <td className="p-4 text-center border-r border-b border-slate-300 text-xs font-bold text-slate-500">{tbnnData?.Hmax ?? '-'}</td>
+                      <td className="p-4 border-r border-b border-slate-300">
+                        <div className="flex items-center justify-center w-full h-full">
+                          <ComparisonBadge current={processedStats.hMax} target={tbnnData?.Hmax ?? null} />
+                        </div>
+                      </td>
                       <td className="p-4 text-center border-b border-slate-300 text-[11px] font-bold text-slate-500">{processedStats.maxDay.split('-').reverse().join('/')}</td>
                     </tr>
                     <tr className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Mực nước thấp nhất (Hmin)</td>
-                      <td className="p-4 text-center border-r border-b border-slate-300"><span className="text-sm font-black text-blue-600">{processedStats.hMin} cm</span></td>
+                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Hmin (cm)</td>
+                      <td className="p-4 text-center border-r border-b border-slate-300"><span className="text-sm font-black text-blue-600">{processedStats.hMin}</span></td>
+                      <td className="p-4 text-center border-r border-b border-slate-300 text-xs font-bold text-slate-500">{tbnnData?.Hmin ?? '-'}</td>
+                      <td className="p-4 border-r border-b border-slate-300">
+                        <div className="flex items-center justify-center w-full h-full">
+                          <ComparisonBadge current={processedStats.hMin} target={tbnnData?.Hmin ?? null} />
+                        </div>
+                      </td>
                       <td className="p-4 text-center border-b border-slate-300 text-[11px] font-bold text-slate-500">{processedStats.minDay.split('-').reverse().join('/')}</td>
                     </tr>
                     <tr className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Mực nước trung bình (Htb)</td>
-                      <td className="p-4 text-center border-r border-b border-slate-300"><span className="text-sm font-black text-slate-900">{processedStats.hTb} cm</span></td>
-                      <td className="p-4 text-center border-b border-slate-300 text-[11px] font-bold text-slate-400">Dựa trên {processedStats.count} ngày</td>
+                      <td className="p-4 text-xs font-bold text-slate-600 border-r border-b border-slate-300 uppercase">Htb (cm)</td>
+                      <td className="p-4 text-center border-r border-b border-slate-300">
+                        <span className="text-sm font-black text-slate-900">
+                          {Math.round(processedStats.hTb)}
+                        </span>
+                      </td>
+                      <td className="p-4 text-center border-r border-b border-slate-300 text-xs font-bold text-slate-500">{tbnnData?.Htb ?? '-'}</td>
+                      <td className="p-4 border-r border-b border-slate-300">
+                        <div className="flex items-center justify-center w-full h-full">
+                           <ComparisonBadge current={processedStats.hTb} target={tbnnData?.Htb ?? null} />
+                        </div>
+                      </td>
+                      <td className="p-4 text-center border-b border-slate-300 text-[11px] font-bold text-slate-400">({processedStats.count} ngày)</td>
                     </tr>
                     <tr className="bg-emerald-50/30 hover:bg-emerald-50 transition-colors">
-                      <td className="p-4 text-xs font-bold text-emerald-800 border-r border-slate-300 uppercase">Tổng lượng mưa (R24)</td>
-                      <td className="p-4 text-center border-r border-slate-300"><span className="text-sm font-black text-emerald-600">{processedStats.rainSum} mm</span></td>
-                      <td className="p-4 text-center text-[10px] font-black text-emerald-400 uppercase tracking-tighter">LƯỢNG MƯA THỜI KỲ</td>
+                      <td className="p-4 text-xs font-bold text-emerald-800 border-r border-slate-300 uppercase">Tổng mưa (mm)</td>
+                      <td className="p-4 text-center border-r border-slate-300"><span className="text-sm font-black text-emerald-600">{processedStats.rainSum}</span></td>
+                      <td className="p-4 text-center border-r border-slate-300 text-xs font-bold text-slate-500">{tbnnData?.Rtb ?? '-'}</td>
+                      <td className="p-4 border-r border-slate-300">
+                        <div className="flex items-center justify-center w-full h-full">
+                           <ComparisonBadge current={parseFloat(processedStats.rainSum)} target={tbnnData?.Rtb ?? null} unit="mm" />
+                        </div>
+                      </td>
+                      <td className="p-4 text-center text-[10px] font-black text-emerald-400 uppercase tracking-tighter">TOÀN THỜI KỲ</td>
                     </tr>
                   </>
                 ) : (
                   <tr>
-                    <td colSpan={3} className="p-20 text-center">
+                    <td colSpan={5} className="p-20 text-center">
                       <div className="flex flex-col items-center gap-2 opacity-30">
                         <RefreshCw size={32} className="text-slate-400" />
                         <span className="text-xs font-black uppercase tracking-widest text-slate-500">Chưa có dữ liệu quan trắc</span>
@@ -315,7 +372,7 @@ const HydroSummary: React.FC = () => {
              <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
                 <FileSpreadsheet size={18} />
              </div>
-             <h4 className="text-xs font-black text-slate-700 uppercase">Phân bộ lượng mưa ngày</h4>
+             <h4 className="text-xs font-black text-slate-700 uppercase">Biểu đồ lượng mưa</h4>
           </div>
 
           <div className="flex-1 min-h-[300px]">
@@ -340,17 +397,22 @@ const HydroSummary: React.FC = () => {
                 <div className="h-full flex items-center justify-center text-[10px] font-black text-slate-300 uppercase">Biểu đồ trống</div>
              )}
           </div>
-
-          <div className="mt-6 p-4 rounded-xl bg-slate-50 border border-slate-100 grid grid-cols-2 gap-4">
-             <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase mb-1 tracking-tighter">Ngày mưa lớn nhất</p>
-                <p className="text-xs font-black text-emerald-600">
-                  {rawStats.length > 0 ? [...rawStats].sort((a,b) => parseFloat(b.R24) - parseFloat(a.R24))[0].Ngay.split('-').reverse().join('/') : '-'}
-                </p>
+          
+          {/* Note Rain Info */}
+          <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
+             <div className="flex justify-between items-center mb-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase text-xs">Lượng mưa lớn nhất</span>
+                <span className="text-[10px] font-bold text-slate-700 text-sm">
+                  {processedStats?.rainMax !== undefined ? `${processedStats.rainMax} mm` : 'N/A'}
+                </span>
              </div>
-             <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase mb-1 tracking-tighter">TB Mực nước</p>
-                <p className="text-xs font-black text-blue-600">{processedStats?.hTb || 0} cm</p>
+             <div className="flex justify-between items-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase">Ngày xảy ra</span>
+                <span className="text-[10px] font-black text-blue-600">
+                   {processedStats?.ngayRainMax !== '-' && processedStats?.ngayRainMax
+                    ? processedStats.ngayRainMax.split('-').reverse().join('/') 
+                    : '--'}
+                </span>
              </div>
           </div>
         </div>

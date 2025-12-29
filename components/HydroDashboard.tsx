@@ -100,7 +100,7 @@ const HydroDashboard: React.FC<Props> = ({ activeMenu, stations, groups, filters
                 <LineChart size={20} />
               </div>
               <div>
-                <h3 className="text-xs font-black text-slate-600 uppercase tracking-tight">Diễn biến mực nước thực tế</h3>
+                <h3 className="text-xs font-black text-slate-600 uppercase tracking-tight">Diễn biến mực nước</h3>
                 <p className="text-[9px] text-blue-500 font-black uppercase tracking-widest">{filters.stationName || '...'}</p>
               </div>
             </div>

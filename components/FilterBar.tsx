@@ -37,7 +37,7 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, onFilterChange, stations
       {/* Cột Trạm */}
       <div className="flex flex-col gap-1.5 w-[160px]">
         <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
-          <MapPin size={10} /> Trạm quan trắc
+          <MapPin size={10} /> Trạm
         </label>
         <select 
           name="stationName"

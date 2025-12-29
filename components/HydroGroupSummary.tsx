@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { StationMetadata } from '../types';
 import { supabase } from '../supabaseClient';
 import { fetchMetadata } from '../services/dataService';
-import { Layers, Calendar, RefreshCw, AlertCircle, FileSpreadsheet, MapPin } from 'lucide-react';
+import { Layers, Calendar, RefreshCw, AlertCircle, FileSpreadsheet, MapPin, TrendingUp, TrendingDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type PeriodType = 'MONTH' | 'T1' | 'T2' | 'T3' | 'DAY' | 'WEEK';
@@ -19,6 +19,10 @@ interface StationSummary {
   NgayRainMax: string;
   RainDays: number;
   HasData: boolean;
+  // TBNN Stats
+  TBNN_Hmax?: number;
+  TBNN_Hmin?: number;
+  TBNN_Rtb?: number; // Thêm trường mưa TBNN
 }
 
 const HydroGroupSummary: React.FC = () => {
@@ -73,10 +77,13 @@ const HydroGroupSummary: React.FC = () => {
       // 2. Determine Date Range
       let startDate = '';
       let endDate = '';
+      let searchPeriod = period === 'WEEK' ? 'MONTH' : period === 'DAY' ? 'MONTH' : period;
+      let searchMonth = selectedMonth;
 
       if (period === 'DAY') {
         startDate = specificDate;
         endDate = specificDate;
+        searchMonth = new Date(specificDate).getMonth() + 1;
       } else {
         const mStr = selectedMonth.toString().padStart(2, '0');
         const lastDayDate = new Date(selectedYear, selectedMonth, 0);
@@ -94,22 +101,13 @@ const HydroGroupSummary: React.FC = () => {
           startDate = `${selectedYear}-${mStr}-21`;
           endDate = `${selectedYear}-${mStr}-${lastDayDate.getDate()}`;
         } else if (period === 'WEEK') {
-           // Logic for a week is tricky without a specific week picker, 
-           // but let's assume "First 7 days of selected month" or similar for simplicity
-           // OR we could add a "Week Number" selector. 
-           // For now, let's treat WEEK as "Current Week of the selected date" if DAY is chosen, 
-           // but since we have Month/Year selector, maybe just 7 days from the 1st?
-           // Let's adjust: Simplify by removing WEEK from logic or treating as 7 days from start of month
-           // Implementing 1 week from specificDate if user selects DAY + WEEK?
-           // To keep UI simple, let's stick to Month parts. 
-           // If user wants custom week, they can use 'DAY' logic? 
-           // No, user asked for "1 week". Let's assume 7 days starting from `specificDate` if period is WEEK
            if (specificDate) {
               const start = new Date(specificDate);
               const end = new Date(start);
               end.setDate(end.getDate() + 6);
               startDate = start.toISOString().split('T')[0];
               endDate = end.toISOString().split('T')[0];
+              searchMonth = start.getMonth() + 1;
            } else {
               startDate = `${selectedYear}-${mStr}-01`;
               endDate = `${selectedYear}-${mStr}-07`;
@@ -127,19 +125,35 @@ const HydroGroupSummary: React.FC = () => {
 
       if (sbError) throw sbError;
 
+      // 3b. Fetch TBNN for ALL stations in group
+      // Chú ý: Sử dụng tên cột lowercase (tentram, hmax...) để khớp với database
+      const { data: tbnnList } = await supabase
+        .from('so_lieu_tbnn')
+        .select('tentram, hmax, hmin, rtb') 
+        .eq('thang', searchMonth)
+        .eq('ky', searchPeriod)
+        .in('tentram', stationsInGroup);
+
       // 4. Aggregate Data per Station
       const results: StationSummary[] = stationsInGroup.map(station => {
         const stationRows = data?.filter(row => row.TenTram === station) || [];
         
-        if (stationRows.length === 0) {
-          return {
-            TenTram: station,
-            Hmax: 0, NgayHmax: '-',
-            Hmin: 0, NgayHmin: '-',
-            RainSum: 0, RainMax: 0, NgayRainMax: '-', RainDays: 0,
-            HasData: false
-          };
-        }
+        // Map using lowercase keys from TBNN result
+        const stationTbnn = tbnnList?.find((t: any) => t.tentram === station);
+        
+        // Base structure
+        const summary = {
+          TenTram: station,
+          Hmax: 0, NgayHmax: '-',
+          Hmin: 0, NgayHmin: '-',
+          RainSum: 0, RainMax: 0, NgayRainMax: '-', RainDays: 0,
+          HasData: false,
+          TBNN_Hmax: stationTbnn?.hmax,
+          TBNN_Hmin: stationTbnn?.hmin,
+          TBNN_Rtb: stationTbnn?.rtb
+        };
+
+        if (stationRows.length === 0) return summary;
 
         let hMax = -Infinity;
         let hMin = Infinity;
@@ -174,18 +188,17 @@ const HydroGroupSummary: React.FC = () => {
           }
         });
 
-        return {
-          TenTram: station,
-          Hmax: hasH ? hMax : 0,
-          NgayHmax: ngayHmax,
-          Hmin: hasH ? hMin : 0,
-          NgayHmin: ngayHmin,
-          RainSum: Number(rainSum.toFixed(1)),
-          RainMax: rainMax === -Infinity ? 0 : rainMax,
-          NgayRainMax: ngayRainMax,
-          RainDays: rainDays,
-          HasData: hasH || rainSum > 0
-        };
+        summary.Hmax = hasH ? hMax : 0;
+        summary.NgayHmax = ngayHmax;
+        summary.Hmin = hasH ? hMin : 0;
+        summary.NgayHmin = ngayHmin;
+        summary.RainSum = Number(rainSum.toFixed(1));
+        summary.RainMax = rainMax === -Infinity ? 0 : rainMax;
+        summary.NgayRainMax = ngayRainMax;
+        summary.RainDays = rainDays;
+        summary.HasData = hasH || rainSum > 0;
+
+        return summary;
       });
 
       setSummaryData(results);
@@ -208,10 +221,13 @@ const HydroGroupSummary: React.FC = () => {
     const excelData = summaryData.map(s => ({
       'Trạm': s.TenTram,
       'Hmax (cm)': s.HasData ? s.Hmax : '-',
+      'TBNN Hmax': s.TBNN_Hmax ?? '-',
       'Ngày Hmax': s.NgayHmax,
       'Hmin (cm)': s.HasData ? s.Hmin : '-',
+      'TBNN Hmin': s.TBNN_Hmin ?? '-',
       'Ngày Hmin': s.NgayHmin,
       'Tổng mưa (mm)': s.RainSum,
+      'TBNN Mưa': s.TBNN_Rtb ?? '-',
       'Ngày mưa': s.RainDays,
       'Mưa lớn nhất': s.RainMax,
       'Ngày mưa lớn nhất': s.NgayRainMax
@@ -223,11 +239,23 @@ const HydroGroupSummary: React.FC = () => {
     XLSX.writeFile(wb, `TongHop_${selectedGroup}_${period}.xlsx`);
   };
 
+  const renderComparison = (current: number, target: number | undefined) => {
+    if (target === undefined || !current) return null;
+    const diff = current - target;
+    const isHigher = diff > 0;
+    return (
+       <div className={`flex items-center justify-center gap-0.5 text-[9px] font-black mt-1 ${isHigher ? 'text-red-500' : 'text-blue-500'}`}>
+          {isHigher ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
+          <span>{isHigher ? '+' : ''}{diff.toFixed(1)}</span>
+       </div>
+    );
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6 animate-fadeIn max-w-[1400px] mx-auto">
        {/* Filter Bar */}
        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap items-end gap-4">
-        {/* Đài */}
+        {/* ... (Keep existing filters) ... */}
         <div className="flex flex-col gap-1.5 w-[140px]">
           <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
             <Layers size={10} /> Đài
@@ -241,7 +269,6 @@ const HydroGroupSummary: React.FC = () => {
           </select>
         </div>
 
-        {/* Thời kỳ */}
         <div className="flex flex-col gap-1.5 min-w-[130px]">
           <label className="text-[10px] font-black text-blue-500 uppercase flex items-center gap-1 ml-1">
             <Calendar size={10} /> Thời kỳ
@@ -320,7 +347,7 @@ const HydroGroupSummary: React.FC = () => {
                 <Layers size={20} />
               </div>
               <div>
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Tổng hợp số liệu toàn Đài</h3>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">Tổng hợp số liệu & So sánh TBNN</h3>
                 <p className="text-[10px] text-blue-600 font-black uppercase tracking-widest">{selectedGroup} • {period}</p>
               </div>
             </div>
@@ -364,13 +391,22 @@ const HydroGroupSummary: React.FC = () => {
                       <tr key={idx} className="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0">
                          <td className="p-3 font-bold text-slate-800 border-r border-slate-200 sticky left-0 bg-white group-hover:bg-slate-50">{row.TenTram}</td>
                          
-                         <td className="p-3 text-center font-bold text-red-600 border-r border-slate-200 bg-red-50/10">{row.HasData ? row.Hmax : '-'}</td>
+                         <td className="p-3 text-center font-bold text-red-600 border-r border-slate-200 bg-red-50/10">
+                           <div>{row.HasData ? row.Hmax : '-'}</div>
+                           {renderComparison(row.Hmax, row.TBNN_Hmax)}
+                         </td>
                          <td className="p-3 text-center text-slate-500 font-medium border-r border-slate-200">{row.NgayHmax !== '-' ? row.NgayHmax.split('-').reverse().slice(0,2).join('/') : '-'}</td>
                          
-                         <td className="p-3 text-center font-bold text-blue-600 border-r border-slate-200 bg-blue-50/10">{row.HasData ? row.Hmin : '-'}</td>
+                         <td className="p-3 text-center font-bold text-blue-600 border-r border-slate-200 bg-blue-50/10">
+                           <div>{row.HasData ? row.Hmin : '-'}</div>
+                           {renderComparison(row.Hmin, row.TBNN_Hmin)}
+                         </td>
                          <td className="p-3 text-center text-slate-500 font-medium border-r border-slate-200">{row.NgayHmin !== '-' ? row.NgayHmin.split('-').reverse().slice(0,2).join('/') : '-'}</td>
                          
-                         <td className="p-3 text-center font-black text-emerald-600 border-r border-slate-200 bg-emerald-50/10">{row.RainSum}</td>
+                         <td className="p-3 text-center font-black text-emerald-600 border-r border-slate-200 bg-emerald-50/10">
+                           <div>{row.RainSum}</div>
+                           {renderComparison(row.RainSum, row.TBNN_Rtb)}
+                         </td>
                          <td className="p-3 text-center font-bold text-slate-700 border-r border-slate-200">{row.RainDays}</td>
                          <td className="p-3 text-center font-bold text-emerald-500 border-r border-slate-200">{row.RainMax}</td>
                          <td className="p-3 text-center text-slate-500 font-medium">{row.NgayRainMax !== '-' ? row.NgayRainMax.split('-').reverse().slice(0,2).join('/') : '-'}</td>

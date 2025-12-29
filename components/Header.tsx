@@ -44,7 +44,7 @@ const Header: React.FC<HeaderProps> = ({ activeMenuName, activeSubMenuName, isCo
         }`}>
           {isConfigured ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
           <span className="text-[10px] font-black uppercase tracking-wider">
-            {isConfigured ? 'DB Live' : 'Offline'}
+            {isConfigured ? 'Kết nối OK' : 'Offline'}
           </span>
         </div>
 
